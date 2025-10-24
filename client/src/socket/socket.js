@@ -21,12 +21,15 @@ export const useSocket = () => {
   const [messages, setMessages] = useState([]);
   const [users, setUsers] = useState([]);
   const [typingUsers, setTypingUsers] = useState([]);
+  const [currentRoom, setCurrentRoom] = useState('general');
+  const [rooms, setRooms] = useState([]);
 
   // Connect to socket server
-  const connect = (username) => {
+  const connect = (username, room = 'general') => {
     socket.connect();
     if (username) {
-      socket.emit('user_join', username);
+      socket.emit('user_join', { username, room });
+      setCurrentRoom(room);
     }
   };
 
@@ -37,12 +40,37 @@ export const useSocket = () => {
 
   // Send a message
   const sendMessage = (message) => {
-    socket.emit('send_message', { message });
+    return new Promise((resolve, reject) => {
+      socket.emit('send_message', { message }, (acknowledgment) => {
+        if (acknowledgment?.success) {
+          resolve(acknowledgment);
+        } else {
+          reject(new Error('Message delivery failed'));
+        }
+      });
+    });
+  };
+
+  // Join a room
+  const joinRoom = (roomId) => {
+    socket.emit('join_room', roomId);
+    setCurrentRoom(roomId);
+    setMessages([]); // Clear messages when switching rooms
+  };
+
+  // Mark message as read
+  const markMessageRead = (messageId) => {
+    socket.emit('mark_message_read', messageId);
   };
 
   // Send a private message
   const sendPrivateMessage = (to, message) => {
     socket.emit('private_message', { to, message });
+  };
+
+  // Toggle message reaction
+  const toggleReaction = (messageId, emoji) => {
+    socket.emit('toggle_reaction', { messageId, emoji });
   };
 
   // Set typing status
@@ -65,6 +93,34 @@ export const useSocket = () => {
     const onReceiveMessage = (message) => {
       setLastMessage(message);
       setMessages((prev) => [...prev, message]);
+    };
+
+    const onMessageHistory = (history) => {
+      setMessages(history);
+    };
+
+    const onMessageReactionUpdated = ({ messageId, reactions }) => {
+      setMessages((prev) => 
+        prev.map(msg => 
+          msg.id === messageId 
+            ? { ...msg, reactions } 
+            : msg
+        )
+      );
+    };
+
+    const onRoomList = (roomList) => {
+      setRooms(roomList);
+    };
+
+    const onMessageRead = ({ messageId, readBy }) => {
+      setMessages((prev) => 
+        prev.map(msg => 
+          msg.id === messageId 
+            ? { ...msg, readBy: [...(msg.readBy || []), readBy] } 
+            : msg
+        )
+      );
     };
 
     const onPrivateMessage = (message) => {
@@ -112,6 +168,10 @@ export const useSocket = () => {
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
     socket.on('receive_message', onReceiveMessage);
+    socket.on('message_history', onMessageHistory);
+    socket.on('message_reaction_updated', onMessageReactionUpdated);
+    socket.on('room_list', onRoomList);
+    socket.on('message_read', onMessageRead);
     socket.on('private_message', onPrivateMessage);
     socket.on('user_list', onUserList);
     socket.on('user_joined', onUserJoined);
@@ -123,6 +183,10 @@ export const useSocket = () => {
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
       socket.off('receive_message', onReceiveMessage);
+      socket.off('message_history', onMessageHistory);
+      socket.off('message_reaction_updated', onMessageReactionUpdated);
+      socket.off('room_list', onRoomList);
+      socket.off('message_read', onMessageRead);
       socket.off('private_message', onPrivateMessage);
       socket.off('user_list', onUserList);
       socket.off('user_joined', onUserJoined);
@@ -138,10 +202,15 @@ export const useSocket = () => {
     messages,
     users,
     typingUsers,
+    currentRoom,
+    rooms,
     connect,
     disconnect,
     sendMessage,
+    joinRoom,
+    markMessageRead,
     sendPrivateMessage,
+    toggleReaction,
     setTyping,
   };
 };
